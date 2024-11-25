@@ -2,6 +2,7 @@ use async_std::task::sleep;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::{Browser, BrowserConfig, Element, Page};
 use clap::Parser;
+use elements::ToTable;
 use futures::StreamExt;
 use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get course info
     wait_element_agressive_retry(&page, elements.course_row, TIMEOUT).await?;
     let courses = elements.get_cart_courses(&page).await?;
+    println!("All Courses");
+    println!("{}", courses.to_table());
 
     // pick courses
     let selected_courses = MultiSelect::new("Select courses", courses).prompt()?;

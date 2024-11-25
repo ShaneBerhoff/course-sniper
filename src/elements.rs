@@ -1,4 +1,5 @@
 use chromiumoxide::{error::CdpError, Element, Page};
+use comfy_table::Table;
 use std::fmt;
 
 #[allow(dead_code)]
@@ -62,6 +63,19 @@ pub enum CourseStatus {
     Closed,
 }
 
+impl fmt::Display for CourseStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CourseStatus::Closed => write!(f, "Closed"),
+            CourseStatus::Waitlist => write!(f, "Waitlist"),
+            CourseStatus::Open {
+                available,
+                capacity,
+            } => write!(f, "Open {}/{}", available, capacity),
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Course {
@@ -98,60 +112,110 @@ impl EmoryPageElements {
     pub async fn get_cart_courses(&self, page: &Page) -> Result<Vec<Course>, CdpError> {
         let course_row_elements = page.find_elements(self.course_row).await?;
         let courses: Vec<Course> =
-            futures::future::try_join_all(course_row_elements.into_iter().enumerate().map(|(index, row)| async move {
-                let course_status = match row
-                    .find_element(self.availability)
-                    .await?
-                    .inner_text()
-                    .await?
-                    .unwrap_or("".to_string())
-                {
-                    text if text.contains("Wait List") => CourseStatus::Waitlist,
-                    text if text.contains("Closed") => CourseStatus::Closed,
-                    text if text.contains("Open") => CourseStatus::Open {
-                        available: 1,
-                        capacity: 10,
-                    },
-                    _ => CourseStatus::Closed,
-                };
+            futures::future::try_join_all(course_row_elements.into_iter().enumerate().map(
+                |(index, row)| async move {
+                    let course_status = match row
+                        .find_element(self.availability)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("".to_string())
+                    {
+                        text if text.contains("Wait List") => CourseStatus::Waitlist,
+                        text if text.contains("Closed") => CourseStatus::Closed,
+                        text if text.contains("Open") => {
+                            let nums: Vec<u32> = row
+                                .find_element(self.seats)
+                                .await?
+                                .inner_text()
+                                .await?
+                                .unwrap_or("".to_string())
+                                .split_whitespace()
+                                .filter_map(|word| word.parse().ok())
+                                .collect();
+                            if nums.len() == 2 {
+                                CourseStatus::Open {
+                                    available: nums[0],
+                                    capacity: nums[1],
+                                }
+                            } else {
+                                CourseStatus::Open {
+                                    available: 0,
+                                    capacity: 0,
+                                }
+                            }
+                        }
+                        _ => CourseStatus::Closed,
+                    };
 
-                Ok::<Course, CdpError>(Course {
-                    checkbox_index: index as u8,
-                    availability: course_status,
-                    description: row
-                        .find_element(self.description)
-                        .await?
-                        .inner_text()
-                        .await?
-                        .unwrap_or("None".to_string()),
-                    schedule: row
-                        .find_element(self.schedule)
-                        .await?
-                        .inner_text()
-                        .await?
-                        .unwrap_or("None".to_string()),
-                    instructor: row
-                        .find_element(self.instructor)
-                        .await?
-                        .inner_text()
-                        .await?
-                        .unwrap_or("None".to_string()),
-                    room: row
-                        .find_element(self.room)
-                        .await?
-                        .inner_text()
-                        .await?
-                        .unwrap_or("None".to_string()),
-                    credits: row
-                        .find_element(self.credits)
-                        .await?
-                        .inner_text()
-                        .await?
-                        .unwrap_or("None".to_string()),
-                })
-            }))
+                    Ok::<Course, CdpError>(Course {
+                        checkbox_index: index as u8,
+                        availability: course_status,
+                        description: row
+                            .find_element(self.description)
+                            .await?
+                            .inner_text()
+                            .await?
+                            .unwrap_or("None".to_string()),
+                        schedule: row
+                            .find_element(self.schedule)
+                            .await?
+                            .inner_text()
+                            .await?
+                            .unwrap_or("None".to_string()),
+                        instructor: row
+                            .find_element(self.instructor)
+                            .await?
+                            .inner_text()
+                            .await?
+                            .unwrap_or("None".to_string()),
+                        room: row
+                            .find_element(self.room)
+                            .await?
+                            .inner_text()
+                            .await?
+                            .unwrap_or("None".to_string()),
+                        credits: row
+                            .find_element(self.credits)
+                            .await?
+                            .inner_text()
+                            .await?
+                            .unwrap_or("None".to_string()),
+                    })
+                },
+            ))
             .await?;
 
         Ok(courses)
+    }
+}
+
+pub trait ToTable {
+    fn to_table(&self) -> Table;
+}
+
+impl ToTable for Vec<Course> {
+    fn to_table(&self) -> Table {
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Course",
+            "Availability",
+            "Schedule",
+            "Room",
+            "Instructor",
+            "Credits",
+        ]);
+
+        for course in self {
+            table.add_row(vec![
+                course.description.clone(),
+                course.availability.to_string(),
+                course.schedule.clone(),
+                course.room.clone(),
+                course.instructor.clone(),
+                course.credits.clone(),
+            ]);
+        }
+        table
     }
 }
