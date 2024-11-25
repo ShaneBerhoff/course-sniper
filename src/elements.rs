@@ -54,11 +54,28 @@ impl fmt::Display for ShoppingCart {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum CourseStatus {
+    Waitlist,
+    Open { available: u32, capacity: u32 },
+    Closed,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Course {
+    pub checkbox_element: Element,
+    pub availability: CourseStatus,
+    pub description: String,
+    pub schedule: String,
+    pub room: String,
+    pub instructor: String,
+    pub credits: String,
+}
+
 impl EmoryPageElements {
-    pub async fn get_shopping_carts(
-        &self,
-        page: &Page,
-    ) -> Result<Vec<ShoppingCart>, CdpError> {
+    pub async fn get_shopping_carts(&self, page: &Page) -> Result<Vec<ShoppingCart>, CdpError> {
         let semester_cart_elements = page.find_elements(self.semester_cart).await?;
         let semester_carts: Vec<ShoppingCart> =
             futures::future::join_all(semester_cart_elements.into_iter().map(|cart| async move {
@@ -70,5 +87,65 @@ impl EmoryPageElements {
             }))
             .await;
         Ok(semester_carts)
+    }
+
+    pub async fn get_cart_courses(&self, page: &Page) -> Result<Vec<Course>, CdpError> {
+        let course_row_elements = page.find_elements(self.course_row).await?;
+        let courses: Vec<Course> =
+            futures::future::try_join_all(course_row_elements.into_iter().map(|row| async move {
+                let course_status = match row
+                    .find_element(self.availability)
+                    .await?
+                    .inner_text()
+                    .await?
+                    .unwrap_or("".to_string())
+                {
+                    text if text.contains("Wait List") => CourseStatus::Waitlist,
+                    text if text.contains("Closed") => CourseStatus::Closed,
+                    text if text.contains("Open") => CourseStatus::Open {
+                        available: 1,
+                        capacity: 10,
+                    },
+                    _ => CourseStatus::Closed,
+                };
+
+                Ok::<Course, CdpError>(Course {
+                    checkbox_element: row.find_element(self.checkboxes).await?,
+                    availability: course_status,
+                    description: row
+                        .find_element(self.schedule)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                    schedule: row
+                        .find_element(self.schedule)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                    instructor: row
+                        .find_element(self.instructor)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                    room: row
+                        .find_element(self.room)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                    credits: row
+                        .find_element(self.credits)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                })
+            }))
+            .await?;
+
+        Ok(courses)
     }
 }

@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .without_confirmation()
         .prompt()?;
 
+    // setup browser
     let (mut browser, mut handler) = if cli_args.detached {
         Browser::launch(BrowserConfig::builder().build()?).await?
     } else {
@@ -46,9 +47,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     browser.clear_cookies().await?;
 
+    // page elements
     let elements = elements::EmoryPageElements::default();
 
     let page = browser.new_page(elements.page_url).await?;
+
+    // login
     page.wait_for_navigation()
         .await?
         .find_element(elements.username_input)
@@ -57,7 +61,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .type_str(user_name)
         .await?;
-
     page.find_element(elements.passwd_input)
         .await?
         .click()
@@ -67,21 +70,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .press_key("Enter")
         .await?;
 
-    find_element_agressive_retry(&page, elements.semester_cart, TIMEOUT).await?;
-
+    // pick a shopping cart
+    wait_element_agressive_retry(&page, elements.semester_cart, TIMEOUT).await?;
     let carts = elements.get_shopping_carts(&page).await?;
     let selected_cart = Select::new("Select a cart", carts).prompt()?;
     selected_cart.element.click().await?;
 
-    find_element_agressive_retry(&page, elements.checkboxes, TIMEOUT).await?;
+    // all checkboxes
+    wait_element_agressive_retry(&page, elements.checkboxes, TIMEOUT).await?;
+    let courses = elements.get_cart_courses(&page).await?;
+    println!("{:?}", courses);
 
-    let checkboxes = page.find_elements(elements.checkboxes).await?;
-    for checkbox in checkboxes {
-        checkbox.click().await?;
+    for course in courses {
+        course.checkbox_element.click().await?;
     }
 
-    find_element_agressive_retry(&page, elements.validate_button, TIMEOUT).await?;
-    page.find_element(elements.validate_button).await?.click().await?;
+    // validate
+    wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT).await?;
+    page.find_element(elements.validate_button)
+        .await?
+        .click()
+        .await?;
 
     sleep(Duration::new(10, 0)).await;
     // cleanup
@@ -92,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn find_element_agressive_retry(
+async fn wait_element_agressive_retry(
     page: &Page,
     selector: &str,
     wait_time: u64,
