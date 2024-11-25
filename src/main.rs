@@ -3,7 +3,7 @@ use chromiumoxide::error::CdpError;
 use chromiumoxide::{Browser, BrowserConfig, Element, Page};
 use clap::Parser;
 use futures::StreamExt;
-use inquire::{Password, PasswordDisplayMode, Select, Text};
+use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -81,10 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let courses = elements.get_cart_courses(&page).await?;
     println!("{:?}", courses);
 
-    for course in courses {
+    // pick a course
+    let selected_courses = MultiSelect::new("Select courses", courses).prompt()?;
+    for course in selected_courses {
         course.checkbox_element.click().await?;
     }
-
     // validate
     wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT).await?;
     page.find_element(elements.validate_button)

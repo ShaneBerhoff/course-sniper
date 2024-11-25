@@ -74,6 +74,12 @@ pub struct Course {
     pub credits: String,
 }
 
+impl fmt::Display for Course {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description)
+    }
+}
+
 impl EmoryPageElements {
     pub async fn get_shopping_carts(&self, page: &Page) -> Result<Vec<ShoppingCart>, CdpError> {
         let semester_cart_elements = page.find_elements(self.semester_cart).await?;
@@ -113,7 +119,7 @@ impl EmoryPageElements {
                     checkbox_element: row.find_element(self.checkboxes).await?,
                     availability: course_status,
                     description: row
-                        .find_element(self.schedule)
+                        .find_element(self.description)
                         .await?
                         .inner_text()
                         .await?
