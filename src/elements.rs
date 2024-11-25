@@ -65,7 +65,7 @@ pub enum CourseStatus {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Course {
-    pub checkbox_element: Element,
+    pub checkbox_index: u8,
     pub availability: CourseStatus,
     pub description: String,
     pub schedule: String,
@@ -98,7 +98,7 @@ impl EmoryPageElements {
     pub async fn get_cart_courses(&self, page: &Page) -> Result<Vec<Course>, CdpError> {
         let course_row_elements = page.find_elements(self.course_row).await?;
         let courses: Vec<Course> =
-            futures::future::try_join_all(course_row_elements.into_iter().map(|row| async move {
+            futures::future::try_join_all(course_row_elements.into_iter().enumerate().map(|(index, row)| async move {
                 let course_status = match row
                     .find_element(self.availability)
                     .await?
@@ -116,7 +116,7 @@ impl EmoryPageElements {
                 };
 
                 Ok::<Course, CdpError>(Course {
-                    checkbox_element: row.find_element(self.checkboxes).await?,
+                    checkbox_index: index as u8,
                     availability: course_status,
                     description: row
                         .find_element(self.description)

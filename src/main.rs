@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let elements = elements::EmoryPageElements::default();
 
     let page = browser.new_page(elements.page_url).await?;
+    page.enable_stealth_mode().await?;
 
     // login
     page.wait_for_navigation()
@@ -76,19 +77,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let selected_cart = Select::new("Select a cart", carts).prompt()?;
     selected_cart.element.click().await?;
 
-    // all checkboxes
-    wait_element_agressive_retry(&page, elements.checkboxes, TIMEOUT).await?;
+    // get course info
+    wait_element_agressive_retry(&page, elements.course_row, TIMEOUT).await?;
     let courses = elements.get_cart_courses(&page).await?;
-    println!("{:?}", courses);
 
-    // pick a course
+    // pick courses
     let selected_courses = MultiSelect::new("Select courses", courses).prompt()?;
-    for course in selected_courses {
-        course.checkbox_element.click().await?;
+    println!("{:?}", selected_courses[0].checkbox_index);
+
+    sleep(Duration::new(10, 0)).await;
+
+    page.reload().await?.wait_for_navigation().await?;
+
+    for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
+        .await?
+        .into_iter()
+        .enumerate()
+    {
+        if selected_courses
+            .iter()
+            .any(|course| course.checkbox_index == index as u8)
+        {
+            checkbox.click().await?;
+        }
     }
+
     // validate
-    wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT).await?;
-    page.find_element(elements.validate_button)
+    wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT)
         .await?
         .click()
         .await?;
@@ -111,6 +126,27 @@ async fn wait_element_agressive_retry(
     let wait_time = Duration::new(wait_time, 0);
     loop {
         match page.find_element(selector).await {
+            Ok(element) => return Ok(element),
+            Err(e) => {
+                if start.elapsed() < wait_time {
+                    continue;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+async fn wait_elements_agressive_retry(
+    page: &Page,
+    selector: &str,
+    wait_time: u64,
+) -> Result<Vec<Element>, CdpError> {
+    let start = Instant::now();
+    let wait_time = Duration::new(wait_time, 0);
+    loop {
+        match page.find_elements(selector).await {
             Ok(element) => return Ok(element),
             Err(e) => {
                 if start.elapsed() < wait_time {
