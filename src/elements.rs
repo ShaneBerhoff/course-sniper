@@ -1,4 +1,4 @@
-use chromiumoxide::{Element, Page};
+use chromiumoxide::{error::CdpError, Element, Page};
 use std::fmt;
 
 #[allow(dead_code)]
@@ -55,7 +55,10 @@ impl fmt::Display for ShoppingCart {
 }
 
 impl EmoryPageElements {
-    pub async fn get_shopping_carts(&self, page: &Page) -> Result<Vec<ShoppingCart>, chromiumoxide::error::CdpError> {
+    pub async fn get_shopping_carts(
+        &self,
+        page: &Page,
+    ) -> Result<Vec<ShoppingCart>, CdpError> {
         let semester_cart_elements = page.find_elements(self.semester_cart).await?;
         let semester_carts: Vec<ShoppingCart> =
             futures::future::join_all(semester_cart_elements.into_iter().map(|cart| async move {
