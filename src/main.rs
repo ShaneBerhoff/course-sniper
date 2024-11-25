@@ -1,7 +1,10 @@
 use async_std::task::sleep;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::{Browser, BrowserConfig, Element, Page};
+use chrono::{Local, Timelike};
 use clap::Parser;
+use core::fmt;
+use std::thread;
 use elements::ToTable;
 use futures::StreamExt;
 use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
@@ -86,9 +89,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // pick courses
     let selected_courses = MultiSelect::new("Select courses", courses).prompt()?;
-    println!("{:?}", selected_courses[0].checkbox_index);
 
-    sleep(Duration::new(10, 0)).await;
+    //TODO improve registration time selection and implimentation
+    let registration_times: Vec<RegistrationTime> = (1..=12)
+        .flat_map(|hour| {
+            (0..60).flat_map(move |minute| {
+                [true, false]
+                    .iter()
+                    .map(move |&am| RegistrationTime(hour, minute, am))
+            })
+        })
+        .collect();
+    let registration_time = Select::new("Select registration time", registration_times).prompt()?;
+    let registration_hour = if registration_time.2 {registration_time.0} else {registration_time.0 + 12};
+    loop {
+        let now = Local::now();
+        if now.hour() == registration_hour && now.minute() == registration_time.1{
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 
     page.reload().await?.wait_for_navigation().await?;
 
@@ -159,5 +179,19 @@ async fn wait_elements_agressive_retry(
                 }
             }
         }
+    }
+}
+
+struct RegistrationTime(u32, u32, bool);
+
+impl fmt::Display for RegistrationTime {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:02}:{:02} {}",
+            self.0,
+            self.1,
+            if self.2 { "AM" } else { "PM" }
+        )
     }
 }
