@@ -1,3 +1,6 @@
+use chromiumoxide::{Element, Page};
+use std::fmt;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EmoryPageElements {
@@ -37,5 +40,32 @@ impl Default for EmoryPageElements {
             credits: r#"span[id^="DERIVED_SSR_FL_SSR_UNITS_LBL$"]"#,
             seats: r#"span[id^="DERIVED_SSR_FL_SSR_DESCR50$"]"#,
         }
+    }
+}
+
+pub struct ShoppingCart {
+    pub element: Element,
+    pub text: String,
+}
+
+impl fmt::Display for ShoppingCart {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.text)
+    }
+}
+
+impl EmoryPageElements {
+    pub async fn get_shopping_carts(&self, page: &Page) -> Result<Vec<ShoppingCart>, chromiumoxide::error::CdpError> {
+        let semester_cart_elements = page.find_elements(self.semester_cart).await?;
+        let semester_carts: Vec<ShoppingCart> =
+            futures::future::join_all(semester_cart_elements.into_iter().map(|cart| async move {
+                let text = cart.inner_text().await.unwrap().expect("test");
+                ShoppingCart {
+                    element: cart,
+                    text,
+                }
+            }))
+            .await;
+        Ok(semester_carts)
     }
 }
