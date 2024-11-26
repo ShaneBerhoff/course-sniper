@@ -1,5 +1,5 @@
 use chromiumoxide::{error::CdpError, Element, Page};
-use comfy_table::Table;
+use comfy_table::{Attribute, Cell, Color, Table};
 use std::fmt;
 
 #[allow(dead_code)]
@@ -245,22 +245,22 @@ impl ToTable for Vec<Course> {
     fn to_table(&self) -> Table {
         let mut table = Table::new();
         table.set_header(vec![
-            "Course",
-            "Availability",
-            "Schedule",
-            "Room",
-            "Instructor",
-            "Credits",
+            Cell::new("Course").add_attribute(Attribute::Bold),
+            Cell::new("Credits"),
+            Cell::new("Availability").add_attribute(Attribute::Bold),
+            Cell::new("Schedule"),
+            Cell::new("Room"),
+            Cell::new("Instructor"),
         ]);
 
         for course in self {
             table.add_row(vec![
-                course.description.clone(),
-                course.availability.to_string(),
-                course.schedule.clone(),
-                course.room.clone(),
-                course.instructor.clone(),
-                course.credits.clone(),
+                Cell::new(course.description.clone()).fg(Color::Green),
+                Cell::new(course.credits.clone()),
+                Cell::new(course.availability.to_string()).fg(Color::Green),
+                Cell::new(course.schedule.split_whitespace().collect::<Vec<&str>>().join(" ")),
+                Cell::new(course.room.clone()),
+                Cell::new(course.instructor.clone()),
             ]);
         }
         table
@@ -292,14 +292,14 @@ impl ToTable for Vec<RegistrationResult> {
     fn to_table(&self) -> Table {
         let mut table = Table::new();
         table.set_header(vec![
-            "Course",
-            "Status",
+            Cell::new("Course"),
+            Cell::new("Status"),
         ]);
 
         for result in self {
             table.add_row(vec![
-                result.description.clone(),
-                result.status.to_string(),
+                Cell::new(result.description.split_whitespace().collect::<Vec<&str>>().join(" ")),
+                Cell::new(result.status.to_string()).set_alignment(comfy_table::CellAlignment::Center),
             ]);
         }
         table

@@ -17,6 +17,7 @@ mod args;
 use args::SniperArgs;
 
 mod elements;
+mod ascii;
 
 const TIMEOUT: u64 = 10;
 
@@ -24,6 +25,9 @@ const TIMEOUT: u64 = 10;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get args
     let cli_args = SniperArgs::parse();
+
+    println!("\n{}\n", ascii::BANNER);
+    println!("Welcome to course-sniper, the precision registration tool.");
 
     let pb = get_progress_bar("Enabling browser...".to_string());
 
