@@ -2,7 +2,6 @@ use chromiumoxide::{error::CdpError, Element, Page};
 use comfy_table::{Attribute, Cell, Color, Table};
 use std::fmt;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EmoryPageElements {
     pub page_url: &'static str,
@@ -69,10 +68,9 @@ impl fmt::Display for ShoppingCart {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum CourseStatus {
-    Waitlist,
+    Waitlist { position: u32 },
     Open { available: u32, capacity: u32 },
     Closed,
 }
@@ -81,7 +79,7 @@ impl fmt::Display for CourseStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             CourseStatus::Closed => write!(f, "Closed"),
-            CourseStatus::Waitlist => write!(f, "Waitlist"),
+            CourseStatus::Waitlist { position } => write!(f, "Waitlist {}", position),
             CourseStatus::Open {
                 available,
                 capacity,
@@ -90,7 +88,6 @@ impl fmt::Display for CourseStatus {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Course {
     pub checkbox_index: u8,
@@ -128,6 +125,16 @@ impl EmoryPageElements {
         let courses: Vec<Course> =
             futures::future::try_join_all(course_row_elements.into_iter().enumerate().map(
                 |(index, row)| async move {
+                    let nums: Vec<u32> = row
+                        .find_element(self.seats)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("".to_string())
+                        .split_whitespace()
+                        .filter_map(|word| word.parse().ok())
+                        .collect();
+
                     let course_status = match row
                         .find_element(self.availability)
                         .await?
@@ -135,18 +142,17 @@ impl EmoryPageElements {
                         .await?
                         .unwrap_or("".to_string())
                     {
-                        text if text.contains("Wait List") => CourseStatus::Waitlist,
+                        text if text.contains("Wait List") => {
+                            if nums.len() == 2 {
+                                CourseStatus::Waitlist {
+                                    position: nums[1] - nums[0],
+                                }
+                            } else {
+                                CourseStatus::Waitlist { position: 999 }
+                            }
+                        }
                         text if text.contains("Closed") => CourseStatus::Closed,
                         text if text.contains("Open") => {
-                            let nums: Vec<u32> = row
-                                .find_element(self.seats)
-                                .await?
-                                .inner_text()
-                                .await?
-                                .unwrap_or("".to_string())
-                                .split_whitespace()
-                                .filter_map(|word| word.parse().ok())
-                                .collect();
                             if nums.len() == 2 {
                                 CourseStatus::Open {
                                     available: nums[0],
@@ -258,7 +264,13 @@ impl ToTable for Vec<Course> {
                 Cell::new(course.description.clone()).fg(Color::Green),
                 Cell::new(course.credits.clone()),
                 Cell::new(course.availability.to_string()).fg(Color::Green),
-                Cell::new(course.schedule.split_whitespace().collect::<Vec<&str>>().join(" ")),
+                Cell::new(
+                    course
+                        .schedule
+                        .split_whitespace()
+                        .collect::<Vec<&str>>()
+                        .join(" "),
+                ),
                 Cell::new(course.room.clone()),
                 Cell::new(course.instructor.clone()),
             ]);
@@ -270,7 +282,7 @@ impl ToTable for Vec<Course> {
 pub enum RegistrationStatus {
     Success,
     Fail,
-    Unknown
+    Unknown,
 }
 
 impl fmt::Display for RegistrationStatus {
@@ -278,7 +290,7 @@ impl fmt::Display for RegistrationStatus {
         match self {
             &RegistrationStatus::Success => write!(f, "✅"),
             RegistrationStatus::Fail => write!(f, "❌"),
-            RegistrationStatus::Unknown => write!(f, "❔")
+            RegistrationStatus::Unknown => write!(f, "❔"),
         }
     }
 }
@@ -291,15 +303,19 @@ pub struct RegistrationResult {
 impl ToTable for Vec<RegistrationResult> {
     fn to_table(&self) -> Table {
         let mut table = Table::new();
-        table.set_header(vec![
-            Cell::new("Course"),
-            Cell::new("Status"),
-        ]);
+        table.set_header(vec![Cell::new("Course"), Cell::new("Status")]);
 
         for result in self {
             table.add_row(vec![
-                Cell::new(result.description.split_whitespace().collect::<Vec<&str>>().join(" ")),
-                Cell::new(result.status.to_string()).set_alignment(comfy_table::CellAlignment::Center),
+                Cell::new(
+                    result
+                        .description
+                        .split_whitespace()
+                        .collect::<Vec<&str>>()
+                        .join(" "),
+                ),
+                Cell::new(result.status.to_string())
+                    .set_alignment(comfy_table::CellAlignment::Center),
             ]);
         }
         table

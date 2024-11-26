@@ -4,6 +4,7 @@ use chromiumoxide::{Browser, BrowserConfig, Element, Page};
 use chrono::{Local, Timelike};
 use clap::Parser;
 use core::fmt;
+use std::borrow::Cow;
 use elements::{EmoryPageElements, ToTable};
 use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -29,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n{}\n", ascii::BANNER);
     println!("Welcome to course-sniper, the precision registration tool.");
 
-    let pb = get_progress_bar("Enabling browser...".to_string());
+    let pb = get_progress_bar("Enabling browser...");
 
     // setup browser
     let (mut browser, mut handler) = if cli_args.detached {
@@ -89,7 +90,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         .without_confirmation()
         .prompt()?;
 
-    let pb = get_progress_bar("Logging in with credentials...".to_string());
+    let pb = get_progress_bar("Logging in with credentials...");
 
     // login
     page.wait_for_navigation()
@@ -121,7 +122,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
             }
             CartTransition::AuthFail => {
                 pb.finish_with_message("Invalid credentials.");
-                Err("Wrong login information")?
+                return Ok(())
             },
         },
         Err(e) => {
@@ -131,7 +132,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
     }
 
     // get course info
-    let pb = get_progress_bar("Fetching courses in cart...".to_string());
+    let pb = get_progress_bar("Fetching courses in cart...");
     wait_element_agressive_retry(&page, elements.course_row, TIMEOUT).await?;
     let courses = elements.get_cart_courses(&page).await?;
     pb.finish_with_message(format!("Found {} courses.", courses.len()));
@@ -173,7 +174,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
 
         page.reload().await?.wait_for_navigation().await?;
 
-        let pb = get_progress_bar("Selecting courses...".to_string());
+        let pb = get_progress_bar("Selecting courses...");
         for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
             .await?
             .into_iter()
@@ -211,7 +212,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         );
 
         // results
-        let pb = get_progress_bar("Waiting for enrollment results...".to_string());
+        let pb = get_progress_bar("Waiting for enrollment results...");
         wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
         let registration_results = elements.get_registration_results(&page).await?;
         pb.finish_with_message(format!(
@@ -220,7 +221,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         ));
         println!("{}", registration_results.to_table());
     } else {
-        let pb = get_progress_bar("Selecting courses...".to_string());
+        let pb = get_progress_bar("Selecting courses...");
         for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
             .await?
             .into_iter()
@@ -246,7 +247,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
             Local::now().format("%H:%M:%S.%3f").to_string()
         );
         // results
-        let pb = get_progress_bar("Waiting for validation results...".to_string());
+        let pb = get_progress_bar("Waiting for validation results...");
         wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
         let registration_results = elements.get_registration_results(&page).await?;
         pb.finish_with_message(format!(
@@ -358,21 +359,13 @@ impl fmt::Display for RegistrationTime {
     }
 }
 
-fn get_progress_bar(msg: String) -> ProgressBar {
+fn get_progress_bar(msg: impl Into<Cow<'static, str>>) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(120));
     pb.set_style(
         ProgressStyle::with_template("{spinner:.blue} {msg}")
             .unwrap()
-            .tick_strings(&[
-                "▹▹▹▹▹",
-                "▸▹▹▹▹",
-                "▹▸▹▹▹",
-                "▹▹▸▹▹",
-                "▹▹▹▸▹",
-                "▹▹▹▹▸",
-                "▪▪▪▪▪",
-            ]),
+            .tick_strings(ascii::SPINNER),
     );
     pb.set_message(msg);
     pb
