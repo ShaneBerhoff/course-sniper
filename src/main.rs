@@ -6,6 +6,7 @@ use clap::Parser;
 use core::fmt;
 use elements::{EmoryPageElements, ToTable};
 use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,12 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get args
     let cli_args = SniperArgs::parse();
 
-    // login info
-    let user_name = Text::new("Username: ").prompt()?;
-    let user_pwd = Password::new("Password: ")
-        .with_display_mode(PasswordDisplayMode::Masked)
-        .without_confirmation()
-        .prompt()?;
+    let pb = get_progress_bar("Enabling browser...".to_string());
 
     // setup browser
     let (mut browser, mut handler) = if cli_args.detached {
@@ -50,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     browser.clear_cookies().await?;
+    pb.finish_with_message("Browser enabled.");
 
     // page elements
     let elements = elements::EmoryPageElements::default();
@@ -57,12 +54,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let page = browser.new_page(elements.page_url).await?;
     page.enable_stealth_mode().await?;
 
-    match run(&page, elements, user_name, user_pwd).await {
+    match run(&page, elements).await {
         Ok(_) => (),
         Err(e) => {
             page.save_screenshot(
                 ScreenshotParams::builder().full_page(true).build(),
-                format!("debug-{}.png", Local::now().format("%H:%M:%S.%3f").to_string()),
+                format!(
+                    "debug-{}.png",
+                    Local::now().format("%H:%M:%S.%3f").to_string()
+                ),
             )
             .await?;
             Err(e)?
@@ -77,12 +77,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run(
-    page: &Page,
-    elements: EmoryPageElements,
-    user_name: String,
-    user_pwd: String,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std::error::Error>> {
+    // login info
+    let user_name = Text::new("Username: ").prompt()?;
+    let user_pwd = Password::new("Password: ")
+        .with_display_mode(PasswordDisplayMode::Masked)
+        .without_confirmation()
+        .prompt()?;
+
+    let pb = get_progress_bar("Logging in with credentials...".to_string());
+
     // login
     page.wait_for_navigation()
         .await?
@@ -102,15 +106,22 @@ async fn run(
         .await?;
 
     // pick a shopping cart
-    wait_element_agressive_retry(&page, elements.semester_cart, TIMEOUT).await?;
+    match wait_element_agressive_retry(&page, elements.semester_cart, TIMEOUT).await {
+        Ok(_) => pb.finish_with_message("Authenticated."),
+        Err(e) => {
+            pb.finish_with_message("Invalid credentials.");
+            Err(e)?
+        }
+    }
     let carts = elements.get_shopping_carts(&page).await?;
     let selected_cart = Select::new("Select a cart", carts).prompt()?;
     selected_cart.element.click().await?;
 
     // get course info
+    let pb = get_progress_bar("Fetching courses in cart...".to_string());
     wait_element_agressive_retry(&page, elements.course_row, TIMEOUT).await?;
     let courses = elements.get_cart_courses(&page).await?;
-    println!("All Courses");
+    pb.finish_with_message(format!("Found {} courses", courses.len()));
     println!("{}", courses.to_table());
 
     // pick courses
@@ -127,6 +138,7 @@ async fn run(
         })
         .collect();
     let registration_time = Select::new("Select registration time", registration_times).prompt()?;
+    let pb = get_progress_bar(format!("Waiting for registration time: {registration_time}..."));
     let registration_hour = if registration_time.2 {
         registration_time.0
     } else {
@@ -139,9 +151,11 @@ async fn run(
         }
         thread::sleep(Duration::from_millis(10));
     }
+    pb.finish_with_message("Reloading for registration.");
 
     page.reload().await?.wait_for_navigation().await?;
 
+    let pb = get_progress_bar("Selecting courses...".to_string());
     for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
         .await?
         .into_iter()
@@ -154,6 +168,7 @@ async fn run(
             checkbox.click().await?;
         }
     }
+    pb.finish_with_message("Courses selected.");
 
     // validate
     wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT)
@@ -162,14 +177,14 @@ async fn run(
         .await?;
 
     println!(
-        "Classes Validated at {}",
+        "Validation clicked at {}",
         Local::now().format("%H:%M:%S.%3f").to_string()
     );
     // results
+    let pb = get_progress_bar("Waiting for results...".to_string());
     wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
-    println!("Results Page Loaded");
     let registration_results = elements.get_registration_results(&page).await?;
-    println!("Registration Results");
+    pb.finish_with_message(format!("Found {} results", registration_results.len()));
     println!("{}", registration_results.to_table());
 
     Ok(())
@@ -229,4 +244,24 @@ impl fmt::Display for RegistrationTime {
             if self.2 { "AM" } else { "PM" }
         )
     }
+}
+
+fn get_progress_bar(msg: String) -> ProgressBar{
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(Duration::from_millis(120));
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")
+            .unwrap()
+            .tick_strings(&[
+                "▹▹▹▹▹",
+                "▸▹▹▹▹",
+                "▹▸▹▹▹",
+                "▹▹▸▹▹",
+                "▹▹▹▸▹",
+                "▹▹▹▹▸",
+                "▪▪▪▪▪",
+            ]),
+    );
+    pb.set_message(msg);
+    pb
 }
