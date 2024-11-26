@@ -106,16 +106,25 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         .await?;
 
     // pick a shopping cart
-    match wait_element_agressive_retry(&page, elements.semester_cart, TIMEOUT).await {
-        Ok(_) => pb.finish_with_message("Authenticated."),
+    match cart_transition(&page, &elements, TIMEOUT).await {
+        Ok(status) => match status {
+            CartTransition::In => pb.finish_with_message("Authenticated."),
+            CartTransition::Select => {
+                pb.finish_with_message("Authenticated.");
+                let carts = elements.get_shopping_carts(&page).await?;
+                let selected_cart = Select::new("Select a cart:", carts).prompt()?;
+                selected_cart.element.click().await?;
+            }
+            CartTransition::AuthFail => {
+                pb.finish_with_message("Invalid credentials.");
+                Err("Wrong login information")?
+            },
+        },
         Err(e) => {
-            pb.finish_with_message("Invalid credentials.");
+            pb.finish_with_message("Failed to find the correct elements or timed out.");
             Err(e)?
         }
     }
-    let carts = elements.get_shopping_carts(&page).await?;
-    let selected_cart = Select::new("Select a cart:", carts).prompt()?;
-    selected_cart.element.click().await?;
 
     // get course info
     let pb = get_progress_bar("Fetching courses in cart...".to_string());
@@ -244,6 +253,49 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
     }
 
     Ok(())
+}
+
+enum CartTransition {
+    In,
+    Select,
+    AuthFail,
+}
+
+async fn cart_transition(
+    page: &Page,
+    elements: &EmoryPageElements,
+    wait_time: u64,
+) -> Result<CartTransition, CdpError> {
+    let start = Instant::now();
+    let wait_time = Duration::new(wait_time, 0);
+    loop {
+        match page.find_element(elements.login_error).await {
+            Ok(_) => return Ok(CartTransition::AuthFail),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.semester_cart).await {
+            Ok(_) => return Ok(CartTransition::Select),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.course_row).await {
+            Ok(_) => return Ok(CartTransition::In),
+            Err(e) => {
+                if start.elapsed() < wait_time {
+                    continue;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
 
 async fn wait_element_agressive_retry(
