@@ -1,15 +1,15 @@
-use async_std::task::sleep;
 use chromiumoxide::error::CdpError;
+use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Element, Page};
 use chrono::{Local, Timelike};
 use clap::Parser;
 use core::fmt;
-use std::thread;
-use elements::ToTable;
+use elements::{EmoryPageElements, ToTable};
 use futures::StreamExt;
 use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 mod args;
@@ -57,6 +57,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let page = browser.new_page(elements.page_url).await?;
     page.enable_stealth_mode().await?;
 
+    match run(&page, elements, user_name, user_pwd).await {
+        Ok(_) => (),
+        Err(e) => {
+            page.save_screenshot(
+                ScreenshotParams::builder().full_page(true).build(),
+                format!("debug-{}.png", Local::now().format("%H:%M:%S.%3f").to_string()),
+            )
+            .await?;
+            Err(e)?
+        }
+    }
+
+    // cleanup
+    browser.close().await?;
+    browser.try_wait()?;
+    running.store(false, Ordering::Relaxed);
+    handle.await;
+    Ok(())
+}
+
+async fn run(
+    page: &Page,
+    elements: EmoryPageElements,
+    user_name: String,
+    user_pwd: String,
+) -> Result<(), Box<dyn std::error::Error>> {
     // login
     page.wait_for_navigation()
         .await?
@@ -101,10 +127,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     let registration_time = Select::new("Select registration time", registration_times).prompt()?;
-    let registration_hour = if registration_time.2 {registration_time.0} else {registration_time.0 + 12};
+    let registration_hour = if registration_time.2 {
+        registration_time.0
+    } else {
+        registration_time.0 + 12
+    };
     loop {
         let now = Local::now();
-        if now.hour() == registration_hour && now.minute() == registration_time.1{
+        if now.hour() == registration_hour && now.minute() == registration_time.1 {
             break;
         }
         thread::sleep(Duration::from_millis(10));
@@ -131,12 +161,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .click()
         .await?;
 
-    sleep(Duration::new(10, 0)).await;
-    // cleanup
-    browser.close().await?;
-    browser.try_wait()?;
-    running.store(false, Ordering::Relaxed);
-    handle.await;
+    println!(
+        "Classes Validated at {}",
+        Local::now().format("%H:%M:%S.%3f").to_string()
+    );
+    // results
+    wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
+    println!("Results Page Loaded");
+    let registration_results = elements.get_registration_results(&page).await?;
+    println!("Registration Results");
+    println!("{}", registration_results.to_table());
+
     Ok(())
 }
 

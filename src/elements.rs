@@ -20,6 +20,11 @@ pub struct EmoryPageElements {
     pub instructor: &'static str,
     pub credits: &'static str,
     pub seats: &'static str,
+    pub results_rows: &'static str,
+    pub result_description: &'static str,
+    pub result_status: &'static str,
+    pub registration_success: &'static str,
+    pub registration_fail: &'static str,
 }
 
 impl Default for EmoryPageElements {
@@ -40,6 +45,11 @@ impl Default for EmoryPageElements {
             instructor: r#"span[id^="DERIVED_REGFRM1_SSR_INSTR_LONG$"]"#,
             credits: r#"span[id^="DERIVED_SSR_FL_SSR_UNITS_LBL$"]"#,
             seats: r#"span[id^="DERIVED_SSR_FL_SSR_DESCR50$"]"#,
+            results_rows: r#"div[id^="win48div$ICField229_row$"]"#,
+            result_description: r#"span[id^="DERIVED_REGFRM1_DESCRLONG$"]"#,
+            result_status: r#"div[id^="win48divDERIVED_REGFRM1_SSR_STATUS_LONG$"]"#,
+            registration_success: "/cs/saprod/cache/PS_CS_STATUS_SUCCESS_ICN_1.gif",
+            registration_fail: "/cs/saprod/cache/PS_CS_STATUS_ERROR_ICN_1.gif",
         }
     }
 }
@@ -188,6 +198,39 @@ impl EmoryPageElements {
 
         Ok(courses)
     }
+
+    pub async fn get_registration_results(
+        &self,
+        page: &Page,
+    ) -> Result<Vec<RegistrationResult>, CdpError> {
+        let result_elements = page.find_elements(self.results_rows).await?;
+        let results: Vec<RegistrationResult> =
+            futures::future::try_join_all(result_elements.into_iter().map(|result| async move {
+                let status_html = result
+                    .find_element(self.result_status)
+                    .await?
+                    .inner_html()
+                    .await?
+                    .unwrap_or("".to_string());
+                Ok::<RegistrationResult, CdpError>(RegistrationResult {
+                    description: result
+                        .find_element(self.result_description)
+                        .await?
+                        .inner_text()
+                        .await?
+                        .unwrap_or("None".to_string()),
+                    status: if status_html.contains(self.registration_success) {
+                        RegistrationStatus::Success
+                    } else if status_html.contains(self.registration_fail) {
+                        RegistrationStatus::Fail
+                    } else {
+                        RegistrationStatus::Unknown
+                    },
+                })
+            }))
+            .await?;
+        Ok(results)
+    }
 }
 
 pub trait ToTable {
@@ -214,6 +257,45 @@ impl ToTable for Vec<Course> {
                 course.room.clone(),
                 course.instructor.clone(),
                 course.credits.clone(),
+            ]);
+        }
+        table
+    }
+}
+
+pub enum RegistrationStatus {
+    Success,
+    Fail,
+    Unknown
+}
+
+impl fmt::Display for RegistrationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &RegistrationStatus::Success => write!(f, "✅"),
+            RegistrationStatus::Fail => write!(f, "❌"),
+            RegistrationStatus::Unknown => write!(f, "❔")
+        }
+    }
+}
+
+pub struct RegistrationResult {
+    pub description: String,
+    pub status: RegistrationStatus,
+}
+
+impl ToTable for Vec<RegistrationResult> {
+    fn to_table(&self) -> Table {
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Course",
+            "Status",
+        ]);
+
+        for result in self {
+            table.add_row(vec![
+                result.description.clone(),
+                result.status.to_string(),
             ]);
         }
         table
