@@ -114,78 +114,134 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         }
     }
     let carts = elements.get_shopping_carts(&page).await?;
-    let selected_cart = Select::new("Select a cart", carts).prompt()?;
+    let selected_cart = Select::new("Select a cart:", carts).prompt()?;
     selected_cart.element.click().await?;
 
     // get course info
     let pb = get_progress_bar("Fetching courses in cart...".to_string());
     wait_element_agressive_retry(&page, elements.course_row, TIMEOUT).await?;
     let courses = elements.get_cart_courses(&page).await?;
-    pb.finish_with_message(format!("Found {} courses", courses.len()));
+    pb.finish_with_message(format!("Found {} courses.", courses.len()));
     println!("{}", courses.to_table());
 
     // pick courses
-    let selected_courses = MultiSelect::new("Select courses", courses).prompt()?;
+    let selected_courses = MultiSelect::new("Select courses:", courses).prompt()?;
 
-    //TODO improve registration time selection and implimentation
-    let registration_times: Vec<RegistrationTime> = (1..=12)
-        .flat_map(|hour| {
-            (0..60).flat_map(move |minute| {
-                [true, false]
-                    .iter()
-                    .map(move |&am| RegistrationTime(hour, minute, am))
+    // pick validate or enroll
+    if Select::new("Select action:", vec!["Validate", "Enroll"]).prompt()? == "Enroll" {
+        //TODO improve registration time selection and implimentation
+        let registration_times: Vec<RegistrationTime> = (1..=12)
+            .flat_map(|hour| {
+                (0..60).flat_map(move |minute| {
+                    [true, false]
+                        .iter()
+                        .map(move |&am| RegistrationTime(hour, minute, am))
+                })
             })
-        })
-        .collect();
-    let registration_time = Select::new("Select registration time", registration_times).prompt()?;
-    let pb = get_progress_bar(format!("Waiting for registration time: {registration_time}..."));
-    let registration_hour = if registration_time.2 {
-        registration_time.0
-    } else {
-        registration_time.0 + 12
-    };
-    loop {
-        let now = Local::now();
-        if now.hour() == registration_hour && now.minute() == registration_time.1 {
-            break;
+            .collect();
+        let registration_time =
+            Select::new("Select registration time:", registration_times).prompt()?;
+        let pb = get_progress_bar(format!(
+            "Waiting for registration time: {registration_time}..."
+        ));
+        let registration_hour = if registration_time.2 {
+            registration_time.0
+        } else {
+            registration_time.0 + 12
+        };
+        loop {
+            let now = Local::now();
+            if now.hour() == registration_hour && now.minute() == registration_time.1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
         }
-        thread::sleep(Duration::from_millis(10));
-    }
-    pb.finish_with_message("Reloading for registration.");
+        pb.finish_with_message("Reloading for registration.");
 
-    page.reload().await?.wait_for_navigation().await?;
+        page.reload().await?.wait_for_navigation().await?;
 
-    let pb = get_progress_bar("Selecting courses...".to_string());
-    for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
-        .await?
-        .into_iter()
-        .enumerate()
-    {
-        if selected_courses
-            .iter()
-            .any(|course| course.checkbox_index == index as u8)
+        let pb = get_progress_bar("Selecting courses...".to_string());
+        for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
+            .await?
+            .into_iter()
+            .enumerate()
         {
-            checkbox.click().await?;
+            if selected_courses
+                .iter()
+                .any(|course| course.checkbox_index == index as u8)
+            {
+                checkbox.click().await?;
+            }
         }
+        pb.finish_with_message("Courses selected.");
+
+        // enroll
+        wait_element_agressive_retry(&page, elements.enroll_button, TIMEOUT)
+            .await?
+            .click()
+            .await?;
+
+        println!(
+            "Enroll clicked at {}",
+            Local::now().format("%H:%M:%S.%3f").to_string()
+        );
+
+        // confirm
+        wait_element_agressive_retry(&page, &elements.enroll_confirm_button, TIMEOUT)
+            .await?
+            .click()
+            .await?;
+
+        println!(
+            "Confirm clicked at {}",
+            Local::now().format("%H:%M:%S.%3f").to_string()
+        );
+
+        // results
+        let pb = get_progress_bar("Waiting for enrollment results...".to_string());
+        wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
+        let registration_results = elements.get_registration_results(&page).await?;
+        pb.finish_with_message(format!(
+            "Found {} enrollment results.",
+            registration_results.len()
+        ));
+        println!("{}", registration_results.to_table());
+    } else {
+        let pb = get_progress_bar("Selecting courses...".to_string());
+        for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
+            .await?
+            .into_iter()
+            .enumerate()
+        {
+            if selected_courses
+                .iter()
+                .any(|course| course.checkbox_index == index as u8)
+            {
+                checkbox.click().await?;
+            }
+        }
+        pb.finish_with_message("Courses selected.");
+
+        // validate
+        wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT)
+            .await?
+            .click()
+            .await?;
+
+        println!(
+            "Validation clicked at {}",
+            Local::now().format("%H:%M:%S.%3f").to_string()
+        );
+        // results
+        let pb = get_progress_bar("Waiting for validation results...".to_string());
+        wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
+        let registration_results = elements.get_registration_results(&page).await?;
+        pb.finish_with_message(format!(
+            "Found {} validation results.",
+            registration_results.len()
+        ));
+        println!("{}", registration_results.to_table());
     }
-    pb.finish_with_message("Courses selected.");
-
-    // validate
-    wait_element_agressive_retry(&page, elements.validate_button, TIMEOUT)
-        .await?
-        .click()
-        .await?;
-
-    println!(
-        "Validation clicked at {}",
-        Local::now().format("%H:%M:%S.%3f").to_string()
-    );
-    // results
-    let pb = get_progress_bar("Waiting for results...".to_string());
-    wait_element_agressive_retry(&page, elements.results_rows, TIMEOUT).await?;
-    let registration_results = elements.get_registration_results(&page).await?;
-    pb.finish_with_message(format!("Found {} results", registration_results.len()));
-    println!("{}", registration_results.to_table());
 
     Ok(())
 }
@@ -246,7 +302,7 @@ impl fmt::Display for RegistrationTime {
     }
 }
 
-fn get_progress_bar(msg: String) -> ProgressBar{
+fn get_progress_bar(msg: String) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(120));
     pb.set_style(
