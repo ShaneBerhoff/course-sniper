@@ -1,14 +1,15 @@
+use async_std::task::sleep;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::{Browser, BrowserConfig, Element, Page};
 use chrono::{Local, Timelike};
 use clap::Parser;
 use core::fmt;
-use std::borrow::Cow;
 use elements::{EmoryPageElements, ToTable};
 use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -17,10 +18,10 @@ use std::time::{Duration, Instant};
 mod args;
 use args::SniperArgs;
 
-mod elements;
 mod ascii;
+mod elements;
 
-const TIMEOUT: u64 = 10;
+const TIMEOUT: u64 = 20;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,10 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pb = get_progress_bar("Enabling browser...");
 
     // setup browser
-    let (mut browser, mut handler) = if cli_args.detached {
-        Browser::launch(BrowserConfig::builder().build()?).await?
-    } else {
+    let (mut browser, mut handler) = if cli_args.attach {
         Browser::launch(BrowserConfig::builder().with_head().build()?).await?
+    } else {
+        Browser::launch(BrowserConfig::builder().build()?).await?
     };
 
     let running = Arc::new(AtomicBool::new(true));
@@ -62,14 +63,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match run(&page, elements).await {
         Ok(_) => (),
         Err(e) => {
-            page.save_screenshot(
-                ScreenshotParams::builder().full_page(true).build(),
-                format!(
-                    "debug-{}.png",
-                    Local::now().format("%H:%M:%S.%3f").to_string()
-                ),
-            )
-            .await?;
+            if cli_args.debug {
+                page.save_screenshot(
+                    ScreenshotParams::builder().full_page(true).build(),
+                    format!(
+                        "debug-{}.png",
+                        Local::now().format("%H:%M:%S.%3f").to_string()
+                    ),
+                )
+                .await?;
+            }
             Err(e)?
         }
     }
@@ -110,20 +113,50 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         .press_key("Enter")
         .await?;
 
+    // authentication transition
+    match authentication_transition(&page, &elements, TIMEOUT).await {
+        Ok(status) => match status {
+            AuthTransition::AuthSuccess => pb.finish_with_message("Authenticated."),
+            AuthTransition::AuthFail => {
+                pb.finish_with_message("Invalid credentials.");
+                return Ok(());
+            }
+            AuthTransition::Duo => {
+                pb.finish_with_message("Duo authentication required.");
+                let pb = get_progress_bar("Waiting for Duo confirmation...");
+                match duo_transition(&page, &elements, TIMEOUT).await {
+                    Ok(status) => match status {
+                        DuoTransition::Trust => pb.finish_with_message("Authenticated."),
+                        DuoTransition::TimeOut => {
+                            pb.finish_with_message("Duo authentication timed out.");
+                            return Ok(());
+                        }
+                        DuoTransition::Cart => pb.finish_with_message("Authenticated."),
+                    },
+                    Err(e) => {
+                        pb.finish_with_message("Failed to find the correct elements or timed out.");
+                        Err(e)?
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            pb.finish_with_message("Failed to find the correct elements or timed out.");
+            Err(e)?
+        }
+    }
+
     // pick a shopping cart
+    let pb = get_progress_bar("Looking for shopping cart");
     match cart_transition(&page, &elements, TIMEOUT).await {
         Ok(status) => match status {
-            CartTransition::In => pb.finish_with_message("Authenticated."),
+            CartTransition::In => pb.finish_with_message("Entered shopping cart."),
             CartTransition::Select => {
-                pb.finish_with_message("Authenticated.");
+                pb.finish_with_message("Shopping carts found.");
                 let carts = elements.get_shopping_carts(&page).await?;
                 let selected_cart = Select::new("Select a cart:", carts).prompt()?;
                 selected_cart.element.click().await?;
             }
-            CartTransition::AuthFail => {
-                pb.finish_with_message("Invalid credentials.");
-                return Ok(())
-            },
         },
         Err(e) => {
             pb.finish_with_message("Failed to find the correct elements or timed out.");
@@ -263,7 +296,109 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
 enum CartTransition {
     In,
     Select,
+}
+
+enum AuthTransition {
+    AuthSuccess,
+    Duo,
     AuthFail,
+}
+
+enum DuoTransition {
+    TimeOut,
+    Trust,
+    Cart,
+}
+
+async fn authentication_transition(
+    page: &Page,
+    elements: &EmoryPageElements,
+    wait_time: u64,
+) -> Result<AuthTransition, CdpError> {
+    let start = Instant::now();
+    let wait_time = Duration::new(wait_time, 0);
+    loop {
+        match page.find_element(elements.login_error).await {
+            Ok(_) => return Ok(AuthTransition::AuthFail),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.duo_waiting).await {
+            Ok(_) => return Ok(AuthTransition::Duo),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.semester_cart).await {
+            Ok(_) => return Ok(AuthTransition::AuthSuccess),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.course_row).await {
+            Ok(_) => return Ok(AuthTransition::AuthSuccess),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn duo_transition(
+    page: &Page,
+    elements: &EmoryPageElements,
+    wait_time: u64,
+) -> Result<DuoTransition, CdpError> {
+    let start = Instant::now();
+    let wait_time = Duration::new(wait_time, 0);
+    loop {
+        match page.find_element(elements.duo_trust_browser).await {
+            Ok(element) => {
+                element.click().await?;
+                return Ok(DuoTransition::Trust);
+            }
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.duo_time_out_try_again).await {
+            Ok(_) => return Ok(DuoTransition::TimeOut),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.semester_cart).await {
+            Ok(_) => return Ok(DuoTransition::Cart),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        match page.find_element(elements.course_row).await {
+            Ok(_) => return Ok(DuoTransition::Cart),
+            Err(e) => {
+                if start.elapsed() >= wait_time {
+                    return Err(e);
+                }
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn cart_transition(
@@ -274,14 +409,6 @@ async fn cart_transition(
     let start = Instant::now();
     let wait_time = Duration::new(wait_time, 0);
     loop {
-        match page.find_element(elements.login_error).await {
-            Ok(_) => return Ok(CartTransition::AuthFail),
-            Err(e) => {
-                if start.elapsed() >= wait_time {
-                    return Err(e);
-                }
-            }
-        }
         match page.find_element(elements.semester_cart).await {
             Ok(_) => return Ok(CartTransition::Select),
             Err(e) => {
@@ -293,13 +420,12 @@ async fn cart_transition(
         match page.find_element(elements.course_row).await {
             Ok(_) => return Ok(CartTransition::In),
             Err(e) => {
-                if start.elapsed() < wait_time {
-                    continue;
-                } else {
+                if start.elapsed() >= wait_time {
                     return Err(e);
                 }
             }
         }
+        sleep(Duration::from_millis(100)).await;
     }
 }
 

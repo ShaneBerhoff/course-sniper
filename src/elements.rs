@@ -26,6 +26,9 @@ pub struct EmoryPageElements {
     pub result_status: &'static str,
     pub registration_success: &'static str,
     pub registration_fail: &'static str,
+    pub duo_waiting: &'static str,
+    pub duo_trust_browser: &'static str,
+    pub duo_time_out_try_again: &'static str,
 }
 
 impl Default for EmoryPageElements {
@@ -53,6 +56,9 @@ impl Default for EmoryPageElements {
             result_status: r#"div[id^="win48divDERIVED_REGFRM1_SSR_STATUS_LONG$"]"#,
             registration_success: "/cs/saprod/cache/PS_CS_STATUS_SUCCESS_ICN_1.gif",
             registration_fail: "/cs/saprod/cache/PS_CS_STATUS_ERROR_ICN_1.gif",
+            duo_waiting: "div#auth-view-wrapper:not(.auth-error)",
+            duo_trust_browser: r#"button[id="trust-browser-button"]"#,
+            duo_time_out_try_again: r#"button.try-again-button"#
         }
     }
 }
