@@ -12,7 +12,6 @@ use inquire::{MultiSelect, Password, PasswordDisplayMode, Select, Text};
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 mod args;
@@ -198,15 +197,31 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
         };
         loop {
             let now = Local::now();
+            // if registration break
             if now.hour() == registration_hour && now.minute() == registration_time.1 {
                 break;
+            } else if now.hour() == registration_hour
+                && now.minute() == registration_time.1 - 1
+                && now.second() >= 50
+            {
+                // if 10 seconds off stop sleeping
+                continue;
+            } else {
+                // if far away sleep
+                sleep(Duration::from_secs(4)).await;
             }
-            thread::sleep(Duration::from_millis(10));
         }
-        pb.finish_with_message("Reloading for registration.");
+        pb.finish_with_message(format!(
+            "Reloaded for registration at {}.",
+            Local::now().format("%H:%M:%S.%3f")
+        ));
 
         page.reload().await?.wait_for_navigation().await?;
 
+        println!(
+            "Page finished loading at {}",
+            Local::now().format("%H:%M:%S.%3f")
+        );
         let pb = get_progress_bar("Selecting courses...");
         for (index, checkbox) in wait_elements_agressive_retry(&page, elements.checkboxes, TIMEOUT)
             .await?

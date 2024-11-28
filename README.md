@@ -11,7 +11,7 @@ Based on your operating system you may need to give it executable permissions `c
 ## Features
 1. **Browser**: Operates a chromium instance through CDP, with the ability for headless execution as well.
 2. **Login**: Used provided credentials to login and waits for DUO push if needed.
-3. **Shopping Cart**: Automatically handles multiple shopping carts and gives full printout of classes in cart.
+3. **Shopping Cart**: Automatically handles multiple shopping carts and gives full printout of classes in cart. Do not adjust your shopping cart from outside the tool while it is in use.
 4. **Course Selection**: Can select any number of courses in the cart and then `course-sniper` will only target those specific courses.
 5. **Actions**: For the selected courses can choose to validate or enroll.
     - Validate 
