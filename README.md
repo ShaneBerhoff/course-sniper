@@ -8,6 +8,9 @@ Run with `./course-sniper [OPTIONS]` or you can add it to your PATH and run from
 
 Based on your operating system you may need to give it executable permissions `chmod +x course-sniper` or you can build from source.
 
+Currently supported schools:
+- Emory University
+
 ## Features
 1. **Browser**: Operates a chromium instance through CDP, with the ability for headless execution as well.
 2. **Login**: Used provided credentials to login and waits for DUO push if needed.
@@ -34,7 +37,7 @@ Based on your operating system you may need to give it executable permissions `c
 ## Installation
 Download the latest release or build from source.
 
-## Building from source
+## Building From Source
 Prerequisites:
 - Rust toolchain which can be installed from [rustup.rs](https://rustup.rs)
 - Cargo (comes with Rust)
