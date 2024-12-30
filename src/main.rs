@@ -146,7 +146,7 @@ async fn run(page: &Page, elements: EmoryPageElements) -> Result<(), Box<dyn std
     }
 
     // pick a shopping cart
-    let pb = get_progress_bar("Looking for shopping cart");
+    let pb = get_progress_bar("Looking for shopping cart...");
     match cart_transition(&page, &elements, TIMEOUT).await {
         Ok(status) => match status {
             CartTransition::In => pb.finish_with_message("Entered shopping cart."),
