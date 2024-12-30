@@ -74,6 +74,11 @@ jobs:
             shasum -a 256 "$binary_name${{ matrix.extension }}" > checksum.sha256
           fi
 
+          # put README
+          cp "../release-docs/${{ matrix.readme }}" README.md
+          sed -i.bak "s/BINARY_NAME/$binary_name/g" README.md
+          rm -f README.md.bak
+
           cd ..
 
           mkdir -p release
